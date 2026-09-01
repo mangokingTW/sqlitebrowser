@@ -10,7 +10,7 @@ a maintainer can run one command and read an assertion.
 ## Running
 
 ```bash
-pip install wintegrate pytest
+pip install "wintegrate>=0.5.1" pytest
 set DB4S_EXE=C:\Program Files\DB Browser for SQLite\DB Browser for SQLite.exe
 pytest tests/ui -v
 ```

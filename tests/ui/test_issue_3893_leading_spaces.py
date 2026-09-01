@@ -64,8 +64,6 @@ pytest.importorskip("wintegrate", reason="pip install wintegrate")
 from wintegrate import Window  # noqa: E402
 from wintegrate.apps import sweep_processes_verified  # noqa: E402
 
-from conftest import maximize  # noqa: E402
-
 pytestmark = pytest.mark.skipif(
     sys.platform != "win32", reason="drives the Windows build through UI Automation"
 )
@@ -149,7 +147,8 @@ def structure_tree_names(recording) -> list[str]:
         # screen next to the Name column and the video has no dead time at the
         # front. Nothing is asserted from the Schema column — UIA does not
         # publish it — but a reader of the recording needs it.
-        maximize(window.hwnd)
+        if not window.maximize():
+            print("the window declined to maximise; the Schema column may be off screen")
         time.sleep(2.0)
         recording.begin()
 
