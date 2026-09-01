@@ -1,0 +1,90 @@
+# Runs the automated reproduction of issue #3893 against a released build.
+#
+# The run is **green when the issue still reproduces**. That is deliberate:
+# `test_leading_spaces_are_preserved` is marked `xfail(strict=True)`, so
+#
+#   green -> the tree still collapses leading spaces on this build
+#   red   -> either the tree now reports the name correctly (XPASS, so the issue
+#            may be fixed), or a control broke and the measurement is not
+#            trustworthy
+#
+# Both architectures run, because DB Browser ships a different Qt per
+# architecture at the same version — win64 carries Qt 5 and arm64 carries Qt 6 —
+# and "does this depend on the Qt version" is the first question anyone will ask.
+name: Reproduce issue 3893
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [wintegrate-repro-issue-3893]
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: win64
+            os: windows-latest
+            qt: Qt 5
+            sha256: D023D54B3A5DB10C7E896089BB3DBE6E7F4BC4EAA9BBECB34CA414BE5970F688
+          - arch: arm64
+            os: windows-11-arm
+            qt: Qt 6
+            # Upstream ships this one unsigned, so the hash is the only check.
+            sha256: 89BF0ADAFAD492F44D850D76C188204F0639F185B50482A3CBD59AFE509B1D84
+    name: "#3893 on ${{ matrix.arch }} (${{ matrix.qt }})"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install wintegrate
+        run: pip install wintegrate pytest
+
+      - name: Install DB Browser for SQLite 3.13.1 (${{ matrix.arch }})
+        shell: pwsh
+        env:
+          DB4S_VERSION: "3.13.1"
+          DB4S_ARCH: ${{ matrix.arch }}
+          DB4S_SHA256: ${{ matrix.sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = "https://github.com/sqlitebrowser/sqlitebrowser/releases/download/" +
+                 "v$env:DB4S_VERSION/DB.Browser.for.SQLite-v$env:DB4S_VERSION-$env:DB4S_ARCH.msi"
+          $msi = Join-Path $env:RUNNER_TEMP 'db4s.msi'
+          Invoke-WebRequest -Uri $url -UseBasicParsing -OutFile $msi -TimeoutSec 600
+
+          $hash = (Get-FileHash $msi -Algorithm SHA256).Hash
+          if ($hash -ne $env:DB4S_SHA256) {
+            throw "SHA-256 mismatch: got $hash, expected $env:DB4S_SHA256"
+          }
+          Write-Host "sha256 ok: $hash"
+
+          $p = Start-Process msiexec.exe -Wait -PassThru `
+            -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart')
+          if ($p.ExitCode -ne 0) { throw "msiexec exited $($p.ExitCode)" }
+
+          $dir = 'C:\Program Files\DB Browser for SQLite'
+          $exe = Join-Path $dir 'DB Browser for SQLite.exe'
+          if (-not (Test-Path $exe)) { throw "not installed at $exe" }
+
+          # Which Qt actually landed decides what this run is evidence about, so
+          # it is checked rather than assumed from the architecture.
+          $qt = if (Test-Path (Join-Path $dir 'Qt6Core.dll')) { 'Qt 6' }
+                elseif (Test-Path (Join-Path $dir 'Qt5Core.dll')) { 'Qt 5' }
+                else { 'unknown' }
+          if ($qt -ne '${{ matrix.qt }}') {
+            throw "expected ${{ matrix.qt }} on $env:DB4S_ARCH but the build carries $qt"
+          }
+          Write-Host ("installed: {0} ({1})" -f (Get-Item $exe).VersionInfo.FileVersion, $qt)
+          "DB4S_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Reproduce
+        run: pytest tests/ui -v -rxX -s

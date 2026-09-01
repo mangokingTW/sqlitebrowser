@@ -20,9 +20,16 @@ Measured on 3.13.1 (win64, Qt 5.15.2), Windows 11 26100 ARM64:
     'no_leading'           'no_leading'                0 -> 0   (control)
 
 `test_leading_spaces_are_preserved` is the one that reproduces the issue: it
-asserts what the tree *should* show and currently fails. The other two are
-controls — without them a failure here could equally mean the harness never
-found the right tree, or that the tables were never created.
+asserts what the tree *should* show. It is marked `xfail(strict=True)` because
+the issue is open, which gives the run a useful meaning in both directions:
+
+* **xfail** — the issue still reproduces on this build.
+* **XPASS → failure** — the tree now reports the name correctly, so either the
+  issue was fixed or the build changed. Worth knowing either way.
+
+The other two tests are controls, and they must pass — without them a red
+reproduction could equally mean the harness never found the right tree, or that
+the tables were never created.
 
 Why read the accessible name rather than compare screenshots: whitespace is
 invisible. A screenshot cannot distinguish two leading spaces from none, and
@@ -120,6 +127,13 @@ def structure_tree_names() -> list[str]:
             f"the Database Structure tree published no names within {TREE_TIMEOUT}s, so "
             "nothing below is measuring what it claims to"
         )
+        # Printed unconditionally: an xfail swallows the assertion output, and the
+        # measurement is the whole point of running this.
+        print("\n  created as            -> tree publishes")
+        for table in TABLES:
+            published = [n for n in names if n.strip() == table.strip()]
+            print(f"  {table!r:<22} -> {published[0]!r}" if published else
+                  f"  {table!r:<22} -> (not found)")
         return names
     finally:
         process.terminate()
@@ -156,9 +170,13 @@ def test_a_name_without_leading_spaces_is_unchanged(structure_tree_names):
     assert _matching(structure_tree_names, NO_LEADING) == [NO_LEADING]
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="issue #3893 is open: the Database Structure tree collapses leading spaces",
+)
 @pytest.mark.parametrize("table", [TWO_LEADING, FOUR_LEADING])
 def test_leading_spaces_are_preserved(structure_tree_names, table):
-    """Reproduces #3893. Currently fails: the leading spaces are gone."""
+    """Reproduces #3893. Expected to fail while the issue is open."""
     published = _matching(structure_tree_names, table)
     assert published == [table], (
         f"the Database Structure tree shows {published!r} for a table created as "

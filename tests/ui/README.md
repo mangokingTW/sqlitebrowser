@@ -18,21 +18,41 @@ pytest tests/ui -v
 `DB4S_EXE` is optional if DB Browser is installed in the default location. The
 tests skip on non-Windows.
 
-## A failing test is the point
+## Green means the issue still reproduces
 
-Each file targets one **open** issue, so the reproduction test is expected to
-fail on a build that still has the bug. Each also carries **controls** that must
-pass — they prove the harness reached the right window and read the right
-widget, so a red reproduction cannot be dismissed as a broken test.
+Each file targets one **open** issue, so the reproduction is marked
+`xfail(strict=True)`. That makes the result meaningful in both directions:
 
-Expected on 3.13.1 for `test_issue_3893_leading_spaces.py`:
+| result | means |
+|---|---|
+| **xfail** | the issue still reproduces on this build |
+| **XPASS** (a failure, because `strict`) | the behaviour changed — fixed, or the build is different |
+| **a control fails** | the harness did not measure what it claims to; ignore the rest |
+
+Expected on 3.13.1:
 
 ```
 test_the_tables_reached_the_tree                        PASSED   <- control
 test_a_name_without_leading_spaces_is_unchanged         PASSED   <- control
-test_leading_spaces_are_preserved[  two_leading]        FAILED   <- the issue
-test_leading_spaces_are_preserved[    four_leading]     FAILED   <- the issue
+test_leading_spaces_are_preserved[  two_leading]        XFAIL    <- the issue
+test_leading_spaces_are_preserved[    four_leading]     XFAIL    <- the issue
 ```
+
+The measured mapping is printed on every run regardless of outcome, because an
+xfail swallows the assertion output and the measurement is the point:
+
+```
+  created as            -> tree publishes
+  '  two_leading'       -> 'two_leading'
+  '    four_leading'    -> 'four_leading'
+  'no_leading'          -> 'no_leading'
+```
+
+## In CI
+
+`.github/workflows/wintegrate-repro-3893.yml` runs this against the released
+3.13.1 msi on **both** architectures — `win64` carries Qt 5 and `arm64` carries
+Qt 6 — so the run also answers "does this depend on the Qt version".
 
 ## Current reproductions
 
