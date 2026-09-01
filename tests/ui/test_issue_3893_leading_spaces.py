@@ -36,11 +36,16 @@ invisible. A screenshot cannot distinguish two leading spaces from none, and
 neither can a human scrolling the tree. It is also the name a screen reader
 announces, so if it is wrong here it is wrong there too.
 
-There is one thing a reader *can* see, though, and the window is maximised so
-that it is on screen: the **Schema** column, right next to the name. It shows
-the application's own `CREATE TABLE " this_name..."` — space after the quote —
-beside a Name column that has dropped it. Same row, same widget, disagreeing
-with itself.
+The window is maximised so the **Schema** column is on screen beside the Name
+column, which is the one thing a reader can see: the schema keeps a space after
+the opening quote where the name has none.
+
+What the recording does **not** show is *how many* spaces were dropped. Measured
+on 3.13.1, the Schema column collapses a run of whitespace to a single space, so
+20 and 2 render identically there, and the Name column drops both entirely. That
+is a wider finding than the issue describes — the collapsing is not confined to
+the Name column — and it is precisely why the count has to be asserted rather
+than looked at.
 """
 
 from __future__ import annotations
@@ -76,11 +81,16 @@ CONTROL_TYPE_TREE_ITEM = 50024
 # this run is readable without a caption: three rows that all start at the same
 # column, two of which say they should not.
 #
-# One of them uses **20** spaces, which is the width the issue's own example
-# used. That is not padding for its own sake — at two spaces the difference in
-# the Schema column beside it (`" this_name` versus `"this_name`) is a single
-# character, and nobody can see that at normal size. At twenty it is an obvious
-# gap. The two-space case stays because the bug is not about how many.
+# One uses **20** spaces, the width the issue's own example used, and it turns
+# out to matter for a reason that was not obvious: measured on 3.13.1, the
+# Database Structure view renders 20 and 2 identically. The Name column drops
+# them entirely and the Schema column beside it collapses the run to a single
+# space, so `CREATE TABLE " this_name` looks the same either way.
+#
+# The whitespace collapsing therefore is not limited to leading spaces in the
+# Name column, which is all the issue describes. Keeping both widths is what
+# demonstrates that the count is not preserved anywhere in this view — and it
+# is also why the recording cannot show the magnitude, only the assertions can.
 TWO_LEADING = "  this_name_starts_with_2_spaces"
 MANY_LEADING = " " * 20 + "this_name_starts_with_20_spaces"
 NO_LEADING = "this_name_starts_with_no_spaces"
