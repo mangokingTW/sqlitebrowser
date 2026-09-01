@@ -14,10 +14,10 @@ Run it with::
 
 Measured on 3.13.1 (win64, Qt 5.15.2), Windows 11 26100 ARM64:
 
-    name in the SQL                        tree item        leading spaces
-    '  this_name_starts_with_2_spaces'     (2 spaces gone)  2 -> 0
-    '    this_name_starts_with_4_spaces'   (4 spaces gone)  4 -> 0
-    'this_name_starts_with_no_spaces'      unchanged        0 -> 0   (control)
+    name in the SQL                          tree item         leading spaces
+    '  this_name_starts_with_2_spaces'       (2 spaces gone)   2 -> 0
+    '<20 spaces>this_name_starts_with_20...' (20 spaces gone)  20 -> 0
+    'this_name_starts_with_no_spaces'        unchanged         0 -> 0   (control)
 
 `test_leading_spaces_are_preserved` is the one that reproduces the issue: it
 asserts what the tree *should* show. It is marked `xfail(strict=True)` because
@@ -74,14 +74,17 @@ CONTROL_TYPE_TREE_ITEM = 50024
 
 # The names describe what should be on screen, so a screenshot or a recording of
 # this run is readable without a caption: three rows that all start at the same
-# column, two of which say they should not. Nothing about the bug depends on the
-# wording — the assertions compare the strings exactly — but "  two_leading"
-# rendered as "two_leading" looks like nothing at all to someone who was not
-# told what to expect.
+# column, two of which say they should not.
+#
+# One of them uses **20** spaces, which is the width the issue's own example
+# used. That is not padding for its own sake — at two spaces the difference in
+# the Schema column beside it (`" this_name` versus `"this_name`) is a single
+# character, and nobody can see that at normal size. At twenty it is an obvious
+# gap. The two-space case stays because the bug is not about how many.
 TWO_LEADING = "  this_name_starts_with_2_spaces"
-FOUR_LEADING = "    this_name_starts_with_4_spaces"
+MANY_LEADING = " " * 20 + "this_name_starts_with_20_spaces"
 NO_LEADING = "this_name_starts_with_no_spaces"
-TABLES = (TWO_LEADING, FOUR_LEADING, NO_LEADING)
+TABLES = (TWO_LEADING, MANY_LEADING, NO_LEADING)
 
 SW_MAXIMIZE = 3
 # How long to leave the populated tree on screen at the end. Nothing waits on
@@ -205,7 +208,7 @@ def test_a_name_without_leading_spaces_is_unchanged(structure_tree_names):
     strict=True,
     reason="issue #3893 is open: the Database Structure tree collapses leading spaces",
 )
-@pytest.mark.parametrize("table", [TWO_LEADING, FOUR_LEADING])
+@pytest.mark.parametrize("table", [TWO_LEADING, MANY_LEADING])
 def test_leading_spaces_are_preserved(structure_tree_names, table):
     """Reproduces #3893. Expected to fail while the issue is open."""
     published = _matching(structure_tree_names, table)

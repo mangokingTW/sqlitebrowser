@@ -27,11 +27,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: win64
+          # `arch` is the machine; `asset` is what upstream calls the download.
+          # They differ for x64 — the runner is x64, the msi is named win64 —
+          # and conflating them produced an artifact called `…-win64` holding a
+          # file called `reproduction-x64.mp4`.
+          - arch: x64
+            asset: win64
             os: windows-latest
             qt: Qt 5
             sha256: D023D54B3A5DB10C7E896089BB3DBE6E7F4BC4EAA9BBECB34CA414BE5970F688
           - arch: arm64
+            asset: arm64
             os: windows-11-arm
             qt: Qt 6
             # Upstream ships this one unsigned, so the hash is the only check.
@@ -98,11 +104,11 @@ jobs:
           print(f'foreground now: {get_window_class(hwnd)!r} {get_window_title(hwnd)!r}')
           "
 
-      - name: Install DB Browser for SQLite 3.13.1 (${{ matrix.arch }})
+      - name: Install DB Browser for SQLite 3.13.1 (${{ matrix.asset }})
         shell: pwsh
         env:
           DB4S_VERSION: "3.13.1"
-          DB4S_ARCH: ${{ matrix.arch }}
+          DB4S_ARCH: ${{ matrix.asset }}
           DB4S_SHA256: ${{ matrix.sha256 }}
         run: |
           $ErrorActionPreference = 'Stop'
