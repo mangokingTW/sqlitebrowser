@@ -1,0 +1,168 @@
+"""Issue #3893 — leading spaces in a name are collapsed in the Database Structure tree.
+
+    https://github.com/sqlitebrowser/sqlitebrowser/issues/3893
+
+This is an automated reproduction. It drives a real DB Browser build through
+Windows UI Automation and reads the names the application publishes for its
+Database Structure tree items.
+
+Run it with::
+
+    pip install wintegrate pytest
+    set DB4S_EXE=C:\\Program Files\\DB Browser for SQLite\\DB Browser for SQLite.exe
+    pytest tests/ui/test_issue_3893_leading_spaces.py -v
+
+Measured on 3.13.1 (win64, Qt 5.15.2), Windows 11 26100 ARM64:
+
+    name in the SQL        UIA name on the tree item   leading spaces
+    '  two_leading'        'two_leading'               2 -> 0
+    '    four_leading'     'four_leading'              4 -> 0
+    'no_leading'           'no_leading'                0 -> 0   (control)
+
+`test_leading_spaces_are_preserved` is the one that reproduces the issue: it
+asserts what the tree *should* show and currently fails. The other two are
+controls — without them a failure here could equally mean the harness never
+found the right tree, or that the tables were never created.
+
+Why read the accessible name rather than compare screenshots: whitespace is
+invisible. A screenshot cannot distinguish two leading spaces from none, and
+neither can a human scrolling the tree. It is also the name a screen reader
+announces, so if it is wrong here it is wrong there too.
+"""
+
+from __future__ import annotations
+
+import os
+import sqlite3
+import sys
+import time
+import uuid
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("wintegrate", reason="pip install wintegrate")
+
+from wintegrate import Window  # noqa: E402
+from wintegrate.apps import sweep_processes_verified  # noqa: E402
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "win32", reason="drives the Windows build through UI Automation"
+)
+
+PROCESS = "DB Browser for SQLite.exe"
+
+# UIA control type ids. The structure tree publishes its rows as tree items on
+# Qt 6 and as list items on Qt 5, so both are collected.
+CONTROL_TYPE_LIST_ITEM = 50007
+CONTROL_TYPE_TREE_ITEM = 50024
+
+TWO_LEADING = "  two_leading"
+FOUR_LEADING = "    four_leading"
+NO_LEADING = "no_leading"
+TABLES = (TWO_LEADING, FOUR_LEADING, NO_LEADING)
+
+# The tree is populated asynchronously after the file opens.
+TREE_TIMEOUT = float(os.environ.get("DB4S_TREE_TIMEOUT", "30"))
+
+
+def _executable() -> str:
+    configured = os.environ.get("DB4S_EXE")
+    if configured:
+        if not Path(configured).exists():
+            pytest.fail(f"DB4S_EXE is set to {configured!r}, which does not exist")
+        return configured
+    for candidate in (
+        r"C:\Program Files\DB Browser for SQLite\DB Browser for SQLite.exe",
+        r"C:\Program Files (x86)\DB Browser for SQLite\DB Browser for SQLite.exe",
+    ):
+        if Path(candidate).exists():
+            return candidate
+    pytest.skip("DB Browser for SQLite not found; set DB4S_EXE to its full path")
+
+
+@pytest.fixture(scope="module")
+def structure_tree_names() -> list[str]:
+    """Every name the Database Structure tree publishes, for a known database."""
+    database = Path(os.environ.get("TEMP", ".")) / f"issue3893-{uuid.uuid4().hex[:8]}.db"
+    connection = sqlite3.connect(database)
+    try:
+        for table in TABLES:
+            connection.execute(f'CREATE TABLE "{table}" ("Field1" INTEGER)')
+        connection.commit()
+    finally:
+        connection.close()
+
+    # An old build otherwise opens a modal announcing a newer version, and the
+    # window behind it never becomes reachable.
+    os.system(
+        r'reg add "HKCU\Software\sqlitebrowser\sqlitebrowser\checkversion" '
+        r"/v enabled /t REG_SZ /d false /f >nul 2>&1"
+    )
+
+    sweep_processes_verified((PROCESS,), ("DB Browser",))
+    time.sleep(1.0)
+    process, window = Window.launch_and_discover(
+        [_executable(), str(database)], timeout=120.0, process_names=(PROCESS,)
+    )
+    try:
+        deadline = time.monotonic() + TREE_TIMEOUT
+        names: list[str] = []
+        while time.monotonic() < deadline:
+            time.sleep(1.0)
+            root = window.re_resolve_element()
+            found = root.find_all(control_type_id=CONTROL_TYPE_TREE_ITEM)
+            found += root.find_all(control_type_id=CONTROL_TYPE_LIST_ITEM)
+            names = [element.name for element in found if element.name]
+            if any(NO_LEADING in name for name in names):
+                break
+        assert names, (
+            f"the Database Structure tree published no names within {TREE_TIMEOUT}s, so "
+            "nothing below is measuring what it claims to"
+        )
+        return names
+    finally:
+        process.terminate()
+        sweep_processes_verified((PROCESS,), ("DB Browser",))
+        database.unlink(missing_ok=True)
+
+
+def _matching(names: list[str], table: str) -> list[str]:
+    """Distinct names the tree publishes for this table, in the order seen.
+
+    De-duplicated because the same row is reachable as both a tree item and a
+    list item depending on the Qt version, and a repeated name would make the
+    assertion below fail for two reasons at once — the interesting one being
+    the whitespace.
+    """
+    seen: list[str] = []
+    for name in names:
+        if name.strip() == table.strip() and name not in seen:
+            seen.append(name)
+    return seen
+
+
+def test_the_tables_reached_the_tree(structure_tree_names):
+    """Control: without this a failure below could just mean nothing was found."""
+    for table in TABLES:
+        assert _matching(structure_tree_names, table), (
+            f"no tree item matched {table.strip()!r}; the tree published "
+            f"{structure_tree_names!r}"
+        )
+
+
+def test_a_name_without_leading_spaces_is_unchanged(structure_tree_names):
+    """Control: the tree does report names accurately when there is no whitespace."""
+    assert _matching(structure_tree_names, NO_LEADING) == [NO_LEADING]
+
+
+@pytest.mark.parametrize("table", [TWO_LEADING, FOUR_LEADING])
+def test_leading_spaces_are_preserved(structure_tree_names, table):
+    """Reproduces #3893. Currently fails: the leading spaces are gone."""
+    published = _matching(structure_tree_names, table)
+    assert published == [table], (
+        f"the Database Structure tree shows {published!r} for a table created as "
+        f"{table!r} — {len(table) - len(table.lstrip())} leading spaces were collapsed. "
+        "The name is what identifies the table, so a name that cannot be read back "
+        "accurately cannot be matched against the schema either."
+    )
