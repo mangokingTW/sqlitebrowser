@@ -14,10 +14,10 @@ Run it with::
 
 Measured on 3.13.1 (win64, Qt 5.15.2), Windows 11 26100 ARM64:
 
-    name in the SQL        UIA name on the tree item   leading spaces
-    '  two_leading'        'two_leading'               2 -> 0
-    '    four_leading'     'four_leading'              4 -> 0
-    'no_leading'           'no_leading'                0 -> 0   (control)
+    name in the SQL                        tree item        leading spaces
+    '  this_name_starts_with_2_spaces'     (2 spaces gone)  2 -> 0
+    '    this_name_starts_with_4_spaces'   (4 spaces gone)  4 -> 0
+    'this_name_starts_with_no_spaces'      unchanged        0 -> 0   (control)
 
 `test_leading_spaces_are_preserved` is the one that reproduces the issue: it
 asserts what the tree *should* show. It is marked `xfail(strict=True)` because
@@ -64,9 +64,15 @@ PROCESS = "DB Browser for SQLite.exe"
 CONTROL_TYPE_LIST_ITEM = 50007
 CONTROL_TYPE_TREE_ITEM = 50024
 
-TWO_LEADING = "  two_leading"
-FOUR_LEADING = "    four_leading"
-NO_LEADING = "no_leading"
+# The names describe what should be on screen, so a screenshot or a recording of
+# this run is readable without a caption: three rows that all start at the same
+# column, two of which say they should not. Nothing about the bug depends on the
+# wording — the assertions compare the strings exactly — but "  two_leading"
+# rendered as "two_leading" looks like nothing at all to someone who was not
+# told what to expect.
+TWO_LEADING = "  this_name_starts_with_2_spaces"
+FOUR_LEADING = "    this_name_starts_with_4_spaces"
+NO_LEADING = "this_name_starts_with_no_spaces"
 TABLES = (TWO_LEADING, FOUR_LEADING, NO_LEADING)
 
 # The tree is populated asynchronously after the file opens.
