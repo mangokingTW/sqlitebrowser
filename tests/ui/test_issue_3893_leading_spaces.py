@@ -35,15 +35,23 @@ Why read the accessible name rather than compare screenshots: whitespace is
 invisible. A screenshot cannot distinguish two leading spaces from none, and
 neither can a human scrolling the tree. It is also the name a screen reader
 announces, so if it is wrong here it is wrong there too.
+
+There is one thing a reader *can* see, though, and the window is maximised so
+that it is on screen: the **Schema** column, right next to the name. It shows
+the application's own `CREATE TABLE " this_name..."` — space after the quote —
+beside a Name column that has dropped it. Same row, same widget, disagreeing
+with itself.
 """
 
 from __future__ import annotations
 
+import ctypes
 import os
 import sqlite3
 import sys
 import time
 import uuid
+from ctypes import wintypes
 from pathlib import Path
 
 import pytest
@@ -74,6 +82,12 @@ TWO_LEADING = "  this_name_starts_with_2_spaces"
 FOUR_LEADING = "    this_name_starts_with_4_spaces"
 NO_LEADING = "this_name_starts_with_no_spaces"
 TABLES = (TWO_LEADING, FOUR_LEADING, NO_LEADING)
+
+SW_MAXIMIZE = 3
+# How long to leave the populated tree on screen at the end. Nothing waits on
+# this — it exists so a recording of the run contains several seconds of the
+# evidence rather than a single frame at the moment everything shuts down.
+HOLD_FOR_THE_RECORDING = float(os.environ.get("DB4S_HOLD", "6"))
 
 # The tree is populated asynchronously after the file opens.
 TREE_TIMEOUT = float(os.environ.get("DB4S_TREE_TIMEOUT", "30"))
@@ -119,6 +133,16 @@ def structure_tree_names() -> list[str]:
         [_executable(), str(database)], timeout=120.0, process_names=(PROCESS,)
     )
     try:
+        # Maximised, so the Schema column is on screen next to the Name
+        # column. That pairing is the whole visual argument: the schema shows
+        # `CREATE TABLE " this_name...` with the space after the quote, and the
+        # name beside it does not. Nothing is asserted from the Schema column —
+        # UIA does not publish it — but a reader of the recording needs it.
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.ShowWindow(window.hwnd, SW_MAXIMIZE)
+        time.sleep(2.0)
+
         deadline = time.monotonic() + TREE_TIMEOUT
         names: list[str] = []
         while time.monotonic() < deadline:
@@ -138,8 +162,9 @@ def structure_tree_names() -> list[str]:
         print("\n  created as            -> tree publishes")
         for table in TABLES:
             published = [n for n in names if n.strip() == table.strip()]
-            print(f"  {table!r:<22} -> {published[0]!r}" if published else
-                  f"  {table!r:<22} -> (not found)")
+            print(f"  {table!r:<38} -> {published[0]!r}" if published else
+                  f"  {table!r:<38} -> (not found)")
+        time.sleep(HOLD_FOR_THE_RECORDING)
         return names
     finally:
         process.terminate()
