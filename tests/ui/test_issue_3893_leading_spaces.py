@@ -50,13 +50,11 @@ than looked at.
 
 from __future__ import annotations
 
-import ctypes
 import os
 import sqlite3
 import sys
 import time
 import uuid
-from ctypes import wintypes
 from pathlib import Path
 
 import pytest
@@ -65,6 +63,8 @@ pytest.importorskip("wintegrate", reason="pip install wintegrate")
 
 from wintegrate import Window  # noqa: E402
 from wintegrate.apps import sweep_processes_verified  # noqa: E402
+
+from conftest import maximize  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "win32", reason="drives the Windows build through UI Automation"
@@ -96,7 +96,6 @@ MANY_LEADING = " " * 20 + "this_name_starts_with_20_spaces"
 NO_LEADING = "this_name_starts_with_no_spaces"
 TABLES = (TWO_LEADING, MANY_LEADING, NO_LEADING)
 
-SW_MAXIMIZE = 3
 # How long to leave the populated tree on screen at the end. Nothing waits on
 # this — it exists so a recording of the run contains several seconds of the
 # evidence rather than a single frame at the moment everything shuts down.
@@ -122,7 +121,7 @@ def _executable() -> str:
 
 
 @pytest.fixture(scope="module")
-def structure_tree_names() -> list[str]:
+def structure_tree_names(recording) -> list[str]:
     """Every name the Database Structure tree publishes, for a known database."""
     database = Path(os.environ.get("TEMP", ".")) / f"issue3893-{uuid.uuid4().hex[:8]}.db"
     connection = sqlite3.connect(database)
@@ -146,15 +145,13 @@ def structure_tree_names() -> list[str]:
         [_executable(), str(database)], timeout=120.0, process_names=(PROCESS,)
     )
     try:
-        # Maximised, so the Schema column is on screen next to the Name
-        # column. That pairing is the whole visual argument: the schema shows
-        # `CREATE TABLE " this_name...` with the space after the quote, and the
-        # name beside it does not. Nothing is asserted from the Schema column —
-        # UIA does not publish it — but a reader of the recording needs it.
-        user32 = ctypes.WinDLL("user32", use_last_error=True)
-        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-        user32.ShowWindow(window.hwnd, SW_MAXIMIZE)
+        # Maximised *before* recording starts, so the Schema column is on
+        # screen next to the Name column and the video has no dead time at the
+        # front. Nothing is asserted from the Schema column — UIA does not
+        # publish it — but a reader of the recording needs it.
+        maximize(window.hwnd)
         time.sleep(2.0)
+        recording.begin()
 
         deadline = time.monotonic() + TREE_TIMEOUT
         names: list[str] = []
