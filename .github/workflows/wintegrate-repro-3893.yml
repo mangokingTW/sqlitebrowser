@@ -46,7 +46,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install wintegrate
-        run: pip install wintegrate pytest
+        run: pip install "wintegrate[video]" pytest
 
       - name: Install DB Browser for SQLite 3.13.1 (${{ matrix.arch }})
         shell: pwsh
@@ -86,5 +86,20 @@ jobs:
           Write-Host ("installed: {0} ({1})" -f (Get-Item $exe).VersionInfo.FileVersion, $qt)
           "DB4S_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # The recording is not the evidence — the assertions are — but it answers
+      # the question a table of booleans cannot: does this look like the bug I
+      # was told about? Kept whatever the outcome, because a red run is the one
+      # worth watching.
       - name: Reproduce
+        env:
+          WINTEGRATE_RECORD: "1"
         run: pytest tests/ui -v -rxX -s
+
+      - name: Upload the recording
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproduction-3893-${{ matrix.arch }}
+          path: recording-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
