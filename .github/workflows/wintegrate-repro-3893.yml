@@ -1,0 +1,118 @@
+# Runs the automated reproduction of issue #3893 against a released build.
+#
+# The run is **green when the issue still reproduces**. That is deliberate:
+# `test_leading_spaces_are_preserved` is marked `xfail(strict=True)`, so
+#
+#   green -> the tree still collapses leading spaces on this build
+#   red   -> either the tree now reports the name correctly (XPASS, so the issue
+#            may be fixed), or a control broke and the measurement is not
+#            trustworthy
+#
+# Both architectures run, because DB Browser ships a different Qt per
+# architecture at the same version — win64 carries Qt 5 and arm64 carries Qt 6 —
+# and "does this depend on the Qt version" is the first question anyone will ask.
+name: Reproduce issue 3893
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [wintegrate-repro-issue-3893]
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `arch` is the machine; `asset` is what upstream calls the download.
+          # They differ for x64 — the runner is x64, the msi is named win64 —
+          # and conflating them produced an artifact called `…-win64` holding a
+          # file called `reproduction-x64.mp4`.
+          - arch: x64
+            asset: win64
+            os: windows-latest
+            qt: Qt 5
+            sha256: D023D54B3A5DB10C7E896089BB3DBE6E7F4BC4EAA9BBECB34CA414BE5970F688
+          - arch: arm64
+            asset: arm64
+            os: windows-11-arm
+            qt: Qt 6
+            # Upstream ships this one unsigned, so the hash is the only check.
+            sha256: 89BF0ADAFAD492F44D850D76C188204F0639F185B50482A3CBD59AFE509B1D84
+    name: "#3893 on ${{ matrix.arch }} (${{ matrix.qt }})"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # One definition of the runner preparation, shared with the other
+      # reproductions: it quiets what steals the foreground on the arm64 image,
+      # installs wintegrate, and starts an on-screen visualiser so the recording
+      # shows which keys and clicks were sent rather than leaving the viewer to
+      # take the inputs on trust.
+      #
+      # It replaces four steps that used to be copy-pasted into this file, and the
+      # copy was broken: `wsl --update` answers "The Windows Subsystem for Linux
+      # is not installed" and exits 0 on that image, so this looked like it was
+      # quieting the 30-second provisioning popup while doing nothing at all.
+      - uses: mangokingTW/wintegrate/.github/actions/setup-windows-gui-test@main
+        with:
+          wintegrate-version: ">=0.5.5"
+
+      - name: Install DB Browser for SQLite 3.13.1 (${{ matrix.asset }})
+        shell: pwsh
+        env:
+          DB4S_VERSION: "3.13.1"
+          DB4S_ARCH: ${{ matrix.asset }}
+          DB4S_SHA256: ${{ matrix.sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = "https://github.com/sqlitebrowser/sqlitebrowser/releases/download/" +
+                 "v$env:DB4S_VERSION/DB.Browser.for.SQLite-v$env:DB4S_VERSION-$env:DB4S_ARCH.msi"
+          $msi = Join-Path $env:RUNNER_TEMP 'db4s.msi'
+          Invoke-WebRequest -Uri $url -UseBasicParsing -OutFile $msi -TimeoutSec 600
+
+          $hash = (Get-FileHash $msi -Algorithm SHA256).Hash
+          if ($hash -ne $env:DB4S_SHA256) {
+            throw "SHA-256 mismatch: got $hash, expected $env:DB4S_SHA256"
+          }
+          Write-Host "sha256 ok: $hash"
+
+          $p = Start-Process msiexec.exe -Wait -PassThru `
+            -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart')
+          if ($p.ExitCode -ne 0) { throw "msiexec exited $($p.ExitCode)" }
+
+          $dir = 'C:\Program Files\DB Browser for SQLite'
+          $exe = Join-Path $dir 'DB Browser for SQLite.exe'
+          if (-not (Test-Path $exe)) { throw "not installed at $exe" }
+
+          # Which Qt actually landed decides what this run is evidence about, so
+          # it is checked rather than assumed from the architecture.
+          $qt = if (Test-Path (Join-Path $dir 'Qt6Core.dll')) { 'Qt 6' }
+                elseif (Test-Path (Join-Path $dir 'Qt5Core.dll')) { 'Qt 5' }
+                else { 'unknown' }
+          if ($qt -ne '${{ matrix.qt }}') {
+            throw "expected ${{ matrix.qt }} on $env:DB4S_ARCH but the build carries $qt"
+          }
+          Write-Host ("installed: {0} ({1})" -f (Get-Item $exe).VersionInfo.FileVersion, $qt)
+          "DB4S_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # The recording is not the evidence — the assertions are — but it answers
+      # the question a table of booleans cannot: does this look like the bug I
+      # was told about? Kept whatever the outcome, because a red run is the one
+      # worth watching.
+      - name: Reproduce
+        env:
+          WINTEGRATE_RECORD: "1"
+        run: pytest tests/ui -v -rxX -s
+
+      - name: Upload the recording
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproduction-3893-${{ matrix.arch }}
+          path: recording-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
